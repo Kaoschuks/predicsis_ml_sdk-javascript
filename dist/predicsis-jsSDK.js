@@ -5,26 +5,35 @@ angular
   .module('predicsis.jsSDK', ['predicsis.jsSDK.models', 'predicsis.jsSDK.helpers', 'restangular'])
   .provider('predicsisAPI', function () {
     'use strict';
+
     var errorHandler = function(response) { throw Error(response); };
     var baseURL = 'https://api.predicsis.com';
     var oauthToken = 'no-token-defined';
+    var requestHeaders = {
+      Accept: 'application/json'
+    };
+
+    this.setErrorHandler = function(handler) { errorHandler = handler; };
 
     this.setBaseUrl = function(url) { baseURL = url; };
     this.getBaseUrl = function() { return baseURL; };
 
-    this.setOauthToken = function(token) { oauthToken = token; };
     this.getOauthToken = function() { return oauthToken; };
     this.hasOauthToken = function() { return Boolean(oauthToken === undefined); };
+    this.setOauthToken = function(token) {
+      if (token !== false) {
+        requestHeaders.Authorization = token;
+        oauthToken = token;
+      }
+    };
 
-    this.setErrorHandler = function(handler) { errorHandler = handler; };
-
-    this.$get = function(Restangular, s3FileHelper,
-                         Datasets, Dictionaries, Jobs, Modalities, Models, OauthTokens, OauthApplications,
-                         PreparationRules, Projects, Reports, UserSettings, Sources, Uploads, Users, Variables) {
+    this.$get = function(Restangular, uploadHelper,
+                         Datafiles, Datasets, Dictionaries, Jobs, Modalities, Models, OauthTokens, OauthApplications,
+                         PreparationRules, Projects, Reports, UserSettings, Sources, Users, Variables) {
       var self = this;
 
       Restangular.setBaseUrl(this.getBaseUrl());
-      Restangular.setDefaultHeaders({ accept: 'application/json', Authorization: 'Bearer ' + this.getOauthToken() });
+      Restangular.setDefaultHeaders(requestHeaders);
       Restangular.setErrorInterceptor(function(response) { errorHandler(response); });
       Jobs.setErrorHandler(function(err) {
         err = {
@@ -53,6 +62,7 @@ angular
       });
 
       return {
+        Datafiles: Datafiles,
         Datasets: Datasets,
         Dictionaries: Dictionaries,
         Jobs: Jobs,
@@ -64,16 +74,15 @@ angular
         Projects: Projects,
         Reports: Reports,
         Sources: Sources,
-        Uploads: Uploads,
         Users: Users,
         UserSettings: UserSettings,
         Variables: Variables,
 
-        s3FileHelper: s3FileHelper,
+        uploadHelper: uploadHelper,
         _restangular: Restangular,
         setOauthToken: function(token) {
           self.setOauthToken(token);
-          Restangular.setDefaultHeaders({ accept: 'application/json', Authorization: token });
+          Restangular.setDefaultHeaders(requestHeaders);
         },
         setErrorHandler: function(handler) {
           self.setErrorHandler(handler);
@@ -84,10 +93,145 @@ angular
 
 /**
  * @ngdoc service
+ * @name predicsis.jsSDK.models.Datafile
+ * @requires $q
+ * @requires Restangular
+ * @description
+ *
+ * <table>
+ *   <tr>
+ *     <td><span class="badge get">get</span> <kbd>/data_files</kbd></td>
+ *     <td><kbd>{@link predicsis.jsSDK.models.Datafiles#methods_all Datafiles.all()}</kbd></td>
+ *     <td></td>
+ *   </tr>
+ *   <tr>
+ *     <td><span class="badge get">get</span> <kbd>/data_files/:id</kbd></td>
+ *     <td><kbd>{@link predicsis.jsSDK.models.Datafiles#methods_get Datafiles.get()}</kbd></td>
+ *     <td></td>
+ *   </tr>
+ *   <tr>
+ *     <td><span class="badge get">get</span> <kbd>/data_files/:id/signed_url</kbd></td>
+ *     <td><kbd>{@link predicsis.jsSDK.models.Datafiles#methods_get_signed_url Datafiles.getSignedUrl()}</kbd></td>
+ *     <td></td>
+ *   </tr>
+ *   <tr>
+ *     <td><span class="badge get">get</span> <kbd>/data_files/:id/signed_url</kbd></td>
+ *     <td><kbd>{@link predicsis.jsSDK.models.Datafiles#methods_download Datafiles.download()}</kbd></td>
+ *     <td></td>
+ *   </tr>
+ *   <tfoot>
+ *     <tr><td colspan="3">Official documentation is available at https://developer.predicsis.com/doc/v1/data_management/data_file/</td></tr>
+ *   </tfoot>
+ * </table>
+ *
+ * Output example of a <kbd>data_file</kbd>:
+ * <pre>
+ * {
+ *   data_file: {
+ *     id: "54edf76c6170700001870000",
+ *     filename: "hello.csv",
+ *     type: "S3",
+ *     size: 24,
+ *     signed_url: {
+ *       links: {
+ *         self: "https://api.predicsis.com/data_files/53c7e7b668796493d3010000/signed_url"
+ *       }
+  *    }
+ *   }
+ * }
+ * </pre>
+ *
+ * Output example of a <kbd>signed_url</kbd>:
+ * <pre>
+ * {
+ *   data_file: {
+ *     signed_url: "http://prod.kml-api.s3-us-west-2.amazonaws.com/uploads/5347b31750432d45a5020000/sources/1415101671848/source.csv"
+ *   }
+ * }
+ * </pre>
+ */
+angular
+  .module('predicsis.jsSDK.models')
+  .service('Datafiles', function($q, Restangular) {
+    'use strict';
+
+    function dataFile(id) { return Restangular.one('data_files', id); }
+    function dataFiles() { return Restangular.all('data_files'); }
+
+    // -----------------------------------------------------------------------------------------------------------------
+
+    /**
+     * @ngdoc function
+     * @name all
+     * @methodOf predicsis.jsSDK.models.Datafiles
+     * @description Get all (or a list of) data files
+     * @param {Array} [dataFileIds] List of data files' ids you want to fetch
+     * @return {Promise} A list of data_files
+     */
+    this.all = function(dataFileIds) {
+      if(dataFileIds === undefined) {
+        return dataFiles().getList();
+      } else {
+        dataFileIds = dataFileIds || [];
+
+        return $q.all(dataFileIds.map(function(id) {
+          return dataFile(id).get();
+        }));
+      }
+    };
+
+    /**
+     * @ngdoc function
+     * @name get
+     * @methodOf predicsis.jsSDK.models.Datafiles
+     * @description Get a single data_file by its id
+     * @param {String} dataFileId data_file identifier
+     * @return {Promise} A single data_file
+     */
+    this.get = function(dataFileId) {
+      return dataFile(dataFileId).get();
+    };
+
+    /**
+     * @ngdoc function
+     * @name getSignedUrl
+     * @methodOf predicsis.jsSDK.models.Datafiles
+     * @description Get a signed_url of a data_file
+     * @param {String} datasetId dataset identifier
+     * @return {Promise} A signed url you can download raw file with
+     */
+    this.getSignedUrl = function(datasetId) {
+      return dataFile(datasetId)
+        .one('signed_url', null).get()
+        .then(function(url) {
+          return url.signed_url;
+        });
+    };
+
+    /**
+     * @ngdoc function
+     * @name download
+     * @methodOf predicsis.jsSDK.models.Datafiles
+     * @description Convenience method to concretely download the file
+     * @param {String} datasetId dataset identifier
+     * @return {Promise} Once the signed url is resolved, we're using <code>window.location.assign</code> to download
+     * the file without changing page.
+     */
+    this.download = function(datasetId) {
+      this.getSignedUrl(datasetId).then(function(signedUrl) {
+        window.location.assign(signedUrl);
+      });
+    };
+
+  });
+
+/**
+ * @ngdoc service
  * @name predicsis.jsSDK.models.Datasets
  * @requires $q
  * @requires Restangular
  * @requires Jobs
+ * @requires $injector: {@link predicsis.jsSDK.models.Sources Sources}
  * @description
  * <table>
  *   <tr>
@@ -177,13 +321,7 @@ angular
  *     children_dataset_ids: [],
  *     dictionary_ids: [],
  *     generated_dictionaries_ids: [],
- *     data_file: {
- *       id: '54904b09776f720001650000',
- *       filename: 'learning-dataset.csv',
- *       type: 'S3',
- *       size: 538296,
- *       url: S3_URL + '/download/file/from/s3/learning-dataset.csv'
- *     },
+ *     data_file: '54904b09776f720001650000',
  *     main_modality: null,
  *     classifier_id: null,
  *     dataset_id: null,
@@ -266,7 +404,7 @@ angular
  */
 angular
   .module('predicsis.jsSDK.models')
-  .service('Datasets', function($q, Restangular, Jobs) {
+  .service('Datasets', function($injector, $q, Restangular, Jobs) {
     'use strict';
     var self = this;
 
@@ -319,6 +457,33 @@ angular
 
     /**
      * @ngdoc function
+     * @name createFromUpload
+     * @methodOf predicsis.jsSDK.models.Datasets
+     * @description Create API resources once an upload is successfully finished:
+     * <ul>
+     *   <li><kbd>POST /sources</kbd></li>
+     *   <li><kbd>POST /datasets</kbd></li>
+     * </ul>
+     *
+     * @param {String} fileName used to create the source and the dataset
+     * @param {String} destFolder AWS key where the dataset has been uploaded
+     * @return {Promise} Newly created dataset
+     */
+    this.createFromUpload = function(fileName, destFolder) {
+      var Sources = $injector.get('Sources');
+
+      return Sources.create({ name: fileName, key: destFolder })
+        .then(function(source) {
+          return self.create({
+            name: fileName,
+            source_ids: [source.id],
+            data_file: { filename: fileName }
+          });
+        });
+    };
+
+    /**
+     * @ngdoc function
      * @name split
      * @methodOf predicsis.jsSDK.models.Datasets
      * @description Split a dataset into subsets according to <code>smapling</code> ratio.
@@ -329,10 +494,10 @@ angular
      *    <li>Idem for learning/testing filenames</li>
      *  </ul>
      *
-     * @param {String} id            Dataset id you want to split (called <em>original dataset</em>)
-     * @param {String} name          Name of the original dataset (used to name its subsets)
-     * @param {String} filename      Name of the original datafile (used to name its subsets's datafile)
-     * @param {Number} [sampling=70] Examples: If you set <code>sampling</code> to 70, you are going to have:
+     * @param {String} id              Dataset id you want to split (called <em>original dataset</em>)
+     * @param {String} name            Name of the original dataset (used to name its subsets)
+     * @param {String} [filename=name] Name of the original datafile (used to name its subsets's datafile). If undefined, value of <kbd>name</kbd> parameter is used
+     * @param {Number} [sampling=70]   Examples: If you set <code>sampling</code> to 70, you are going to have:
      * <ul>
      *   <li><code>70%</code> of your original dataset for <b>learning</b></li>
      *   <li><code>30%</code> of your original dataset for <b>testing</b></li>
@@ -340,7 +505,9 @@ angular
      * @return {Promise} Subsets
      */
     this.split = function(id, name, filename, sampling) {
+      filename = filename || name;
       sampling = sampling || 70;
+
       var learn = {
         parent_dataset_id: id,
         name: 'learned_' +  name,
@@ -477,6 +644,35 @@ angular
       return dataset(id).remove();
     };
 
+    /**
+     * @ngdoc function
+     * @methodOf predicsis.jsSDK.models.Datasets
+     * @name removeDependencies
+     * @description Remove dataset's children and sources
+     *
+     * <div><span class="badge delete">delete</span><code>/sources/:source_id<code></div>
+     * <div><span class="badge delete">delete</span><code>/datasets/:train_subset_id</code></div>
+     * <div><span class="badge delete">delete</span><code>/datasets/:test_subset_id</code></div>
+     * @param {Object} dataset Instance of {@link predicsis.jsSDK.models.Datasets dataset}
+     * @return {Promise} Removed dataset
+     */
+    this.removeDependencies = function(dataset) {
+      var Sources = $injector.get('Sources');
+      var source_ids = dataset.source_ids || [];
+      var children_ids = dataset.children_dataset_ids || [];
+
+      return $q.all([
+        $q.all(source_ids
+          .map(function(source_id) {
+            return Sources.delete(source_id);
+          })),
+        $q.all(children_ids
+          .map(function(child_id) {
+            return self.delete(child_id);
+          }))
+      ]);
+    };
+
     // -----------------------------------------------------------------------------------------------------------------
 
     /**
@@ -576,7 +772,6 @@ angular
         && Boolean(dataset.classifier !== null)
         && Boolean(dataset.dataset_id !== null);
     };
-
   });
 
 /**
@@ -2595,6 +2790,11 @@ angular
  *     <td></td>
  *   </tr>
  *   <tr>
+ *     <td><span class="badge get">getCredentials</span> <kbd>/sources/credentials/:storageType</kbd></td>
+ *     <td><kbd>{@link predicsis.jsSDK.models.Sources#methods_get Sources.getCredentials()}</kbd></td>
+ *     <td></td>
+ *   </tr>
+ *   <tr>
  *     <td><span class="badge patch">patch</span> <kbd>/sources/:id</kbd></td>
  *     <td><kbd>{@link predicsis.jsSDK.models.Sources#methods_update Sources.update()}</kbd></td>
  *     <td><span class="badge async">async</span></td>
@@ -2698,6 +2898,32 @@ angular
 
     /**
      * @ngdoc function
+     * @name getCredentials
+     * @methodOf predicsis.jsSDK.models.Sources
+     * @description Request credentials to our storage service
+     *  Credentials for S3 storage looks like:
+     *  <pre>
+     *  {
+     *    credentials: {
+     *      expires_at: "2014-06-23T08:07:19.000Z",
+     *      key: "uploads/5347b31750432d45a5020000/sources/1415101671848/${filename}",
+     *      aws_access_key_id: "predicsis_aws_access_key_id",
+     *      signature: "encoded_signature",
+     *      policy: "encoded_policy",
+     *      s3_endpoint: "http://dev.public.kml-api.s3-us-west-2.amazonaws.com"
+     *    }
+     *  }
+     *  </pre>
+     *
+     * @param {String} storageService Available services are : <ul><li><code>s3</code></li></ul>
+     * @return {Object} See above description
+     */
+    this.getCredentials = function(storageService) {
+      return sources().one('credentials', storageService).get();
+    };
+
+    /**
+     * @ngdoc function
      * @name update
      * @methodOf predicsis.jsSDK.models.Sources
      * @description Update specified source
@@ -2725,105 +2951,6 @@ angular
      */
     this.delete = function(sourceId) {
       return source(sourceId).remove();
-    };
-
-  });
-
-/**
- * @ngdoc service
- * @name predicsis.jsSDK.models.Uploads
- * @requires $q
- * @requires Restangular
- * @description
- * <table>
- *   <tr>
- *     <td><span class="badge get">get</span> <kbd>/sources/credentials/s3</kbd></td>
- *     <td><kbd>{@link predicsis.jsSDK.models.Uploads#methods_getcredentials Upload.getCredentials()}</kbd></td>
- *     <td></td>
- *   </tr>
- *   <tr>
- *     <td><span class="badge post">post</span> <kbd>/sources/credentials/s3</kbd></td>
- *     <td><kbd>{@link predicsis.jsSDK.models.Uploads#methods_sign Upload.sign(key)}</kbd></td>
- *     <td></td>
- *   </tr>
- *   <tfoot>
- *   <tr><td colspan="3">Official documentation is available at https://developer.predicsis.com/doc/v1/data_management/upload/</td></tr>
- *   </tfoot>
- * </table>
- *
- * Uploads are performed in 3 steps (this model only deals with the first one):
- * <ul>
- *   <li>Get credentials to our storage service and upload a file</li>
- *   <li>Create a source to persist upload in our database</li>
- *   <li>Create a dataset from this source</li>
- * </ul>
- */
-angular
-  .module('predicsis.jsSDK.models')
-  .service('Uploads', function(Restangular) {
-    'use strict';
-
-    function credentials(storageService) { return Restangular.all('sources').one('credentials', storageService); }
-
-    // -----------------------------------------------------------------------------------------------------------------
-
-    /**
-     * @ngdoc function
-     * @name getCredentials
-     * @methodOf predicsis.jsSDK.models.Uploads
-     * @description Request credentials to our storage service
-     *  Credentials for S3 storage looks like:
-     *  <pre>
-     *  {
-     *    credentials: {
-     *      expires_at: "2014-06-23T08:07:19.000Z",
-     *      key: "uploads/5347b31750432d45a5020000/sources/1415101671848/${filename}",
-     *      aws_access_key_id: "predicsis_aws_access_key_id",
-     *      signature: "encoded_signature",
-     *      policy: "encoded_policy",
-     *      s3_endpoint: "http://dev.public.kml-api.s3-us-west-2.amazonaws.com"
-     *    }
-     *  }
-     *  </pre>
-     *
-     * @param {String} storageService Available services are : <ul><li><code>s3</code></li></ul>
-     * @return {Object} See above description
-     */
-    this.getCredentials = function(storageService) {
-      return credentials(storageService).get();
-    };
-
-    /**
-     * @ngdoc function
-     * @name sign
-     * @methodOf predicsis.jsSDK.models.Uploads
-     * @description Sign POST requests from fineuploader library
-     *  This route is required to use {@link http://docs.fineuploader.com/branch/master/endpoint_handlers/amazon-s3.html#required-server-side-tasks-all-browsers fineuploader library}.
-     *
-     *  <b>Important note</b>
-     *  This request returns a object like:
-     *  <pre>
-     *  {
-     *    credentials: {
-     *      expires_at: "2014-06-23T08:07:19.000Z",
-     *      key: "uploads/5347b31750432d45a5020000/sources/1415101671848/${filename}",
-     *      aws_access_key_id: "predicsis_aws_access_key_id",
-     *      signature: "encoded_signature",
-     *      policy: "encoded_policy",
-     *      s3_endpoint: "http://dev.public.kml-api.s3-us-west-2.amazonaws.com"
-     *    }
-     *  }
-     *  </pre>
-     *
-     *  ... but the library only needs (and expects) <kbd>policy</kbd> and <kbd>signature</kbd> properties. So I had to
-     *  change the source code of fineuploader lib to remove the header of the response. That's the main reason to commit
-     *  this source code in the project (under <kbd>app/vendor/s3.fineuploader-5.0.8/</kbd>).
-     *
-     * @param {String} key Path where the file is going to be uploaded
-     * @return {Object} A credentials object which must contains at least <kbd>policy</kbd> and <kbd>signature</kbd> properties.
-     */
-    this.sign = function(key) {
-      return credentials('s3', key).post({credentials: {key: key}});
     };
 
   });
@@ -3169,147 +3296,216 @@ angular
 
 /**
  * @ngdoc service
- * @name predicsis.jsSDK.helpers.s3FileHelper
- * @require $injector
- * - Uploads
+ * @name predicsis.jsSDK.helpers.uploadHelper
+ * @requires $rootScope
+ * @requires $injector
+ * - Sources
  */
 angular
   .module('predicsis.jsSDK.helpers')
-  .service('s3FileHelper', function($injector) {
+  .service('uploadHelper', function($rootScope, $injector) {
     'use strict';
 
-    var Upload = $injector.get('Uploads');
-    var files = [];
-    var progressHandlers = [];
-    var endHandlers = [];
-    var errorHandlers = [];
-    var requests = [];
+    var HTTP = { CREATED: 201 };
+    var concurrentUploads = {};
+    var Sources = $injector.get('Sources');
 
-    function findFileIndex(file) {
-      var index = files.indexOf(file);
-      if(index === -1) {
-        files.push(file);
-        index = files.length - 1;
-      }
-      return index;
+    function getKey(credential, filename) {
+      return credential.key.replace('${filename}', filename);
     }
 
-    function progressHandler(fileIndex, evt) {
-      if(progressHandlers[fileIndex]) {
-        progressHandlers[fileIndex](evt);
-      }
-    }
+    function upload(uploadObject, xhr2, credential, file) {
+      var headers = {
+        key: getKey(credential, file.name),
+        AWSAccessKeyId: credential.aws_access_key_id,
+        'Content-Type': 'multipart/form-data',
+        success_action_status: HTTP.CREATED,
+        acl: 'private',
+        policy: credential.policy,
+        signature: credential.signature
+      };
+      var content = { file: file };
+      var form = formFactory(headers, content);
 
-    function endHandler(fileIndex, evt) {
-      if(endHandlers[fileIndex]) {
-        endHandlers[fileIndex](evt);
-      }
-    }
+      xhr2.open('POST', credential.s3_endpoint, true);
 
-    function errorHandler(fileIndex, err) {
-      if(errorHandlers[fileIndex]) {
-        errorHandlers[fileIndex](err);
-      }
-    }
+      xhr2.upload.addEventListener('progress', function(event) {
+        uploadObject.progression = parseInt(event.loaded / event.total * 100);
+        uploadObject.isUploading = true;
 
-    function clean(fileIndex) {
-      delete progressHandlers[fileIndex];
-      delete files[fileIndex];
-      delete requests[fileIndex];
-    }
+        $rootScope.$broadcast('jsSDK.upload.progress', uploadObject);
+      });
 
-    function abort(file) {
-      var fileIndex = findFileIndex(file);
-      if(requests[fileIndex]) {
-        requests[fileIndex].abort();
-      }
-      clean(fileIndex);
-    }
+      xhr2.addEventListener('load', function() {
+        delete concurrentUploads[uploadObject.id];
+        uploadObject.isUploading = false;
 
-    function addProgressListener(file, cb) {
-      var fileIndex = findFileIndex(file);
-      progressHandlers[fileIndex] = cb;
-    }
+        if(xhr2.status === HTTP.CREATED) {
+          $rootScope.$broadcast('jsSDK.upload.uploaded', uploadObject);
+        } else {
+          $rootScope.$broadcast('jsSDK.upload.error', { upload: uploadObject, request: xhr2 });
+        }
+      });
 
-    function addEndListener(file, cb) {
-      var fileIndex = findFileIndex(file);
-      endHandlers[fileIndex] = cb;
-    }
+      xhr2.addEventListener('error', function() {
+        delete concurrentUploads[uploadObject.id];
+        uploadObject.isUploading = false;
+        $rootScope.$broadcast('jsSDK.upload.error', { upload: uploadObject, request: xhr2 });
+      });
 
-    function addErrorListener(file, cb) {
-      var fileIndex = findFileIndex(file);
-      errorHandlers[fileIndex] = cb;
+      xhr2.send(form);
     }
 
     /**
      * @ngdoc function
-     * @methodOf predicsis.jsSDK.helpers.s3FileHelper
+     * @methodOf predicsis.jsSDK.helpers.uploadHelper
      * @name upload
-     * @description upload a file to S3
+     * @description upload a file
+     * The upload method raises the following events during the upload process:
+     * <ul>
+     *   <li><kbd>jsSDK.upload.starting</kbd></li>
+     *   <li><kbd>jsSDK.upload.progress</kbd></li>
+     *   <li><kbd>jsSDK.upload.uploaded</kbd></li>
+     *   <li><kbd>jsSDK.upload.cancelled</kbd></li>
+     *   <li><kbd>jsSDK.upload.error</kbd></li>
+     *   <li><kbd></kbd></li>
+     * </ul>
+     *
+     * Each of these events is emitted with an <code>upload</code> object which contains details:
+     * <table>
+     *   <tr>
+     *     <td><kbd>id</kbd></td>
+     *     <td>Concatenation of a timestamp and uploaded file name</td>
+     *   </tr>
+     *   <tr>
+     *     <td><kbd>key</kbd></td>
+     *     <td>
+     *       Destination folder of uploaded file.
+     *       This value will be required to create the Source resource once the upload finished.
+     *       It's initialized to null and updated when the GET /sources/credentials/s3 request is resolved.
+     *     </td>
+     *   </tr>
+     *   <tr>
+     *     <td><kbd>fileName</kbd></td>
+     *     <td>Uploaded file's name given by FileAPI</td>
+     *   </tr>
+     *   <tr>
+     *     <td><kbd>fileSize</kbd></td>
+     *     <td>Uploaded file's size given by FileAPI</td>
+     *   </tr>
+     *   <tr>
+     *     <td><kbd>progression</kbd></td>
+     *     <td>A number ([0..100]) internally updated on each <kbd>progress</kbd> event</td>
+     *   </tr>
+     *   <tr>
+     *     <td><kbd>isUploading</kbd></td>
+     *     <td>A boolean indicating if the upload process is still running</td>
+     *   </tr>
+     *   <tr>
+     *     <td><kbd>created_at</kbd></td>
+     *     <td>A timestamp in ISO format like <kbd>2014-05-02T15:27:37.687Z</kbd></td>
+     *   </tr>
+     *   <tr>
+     *     <td><kbd>cancelUpload</kbd></td>
+     *     <td>A function which will stop the upload by aborting the request</td>
+     *   </tr>
+     * </table>
+     *
+     * About the <kbd>jsSDK.upload.starting</kbd> event. As it's fired before sending the
+     * "Get credential" request. So,
+     * - you may have a delay between <kbd>jsSDK.upload.starting</kbd> and the first <kbd>jsSDK.upload.progress</kbd> events.
+     * - the <kbd>key</kbd> parameter of the <kbd>uploadObject</kbd> object is not set
+     *
+     * The upload is performed through a XMLHttpRequest, and all details about endpoint, security,
+     * destination folder is handled by the API and its <code>Sources.getCredentials</code> request.
      *
      * @param {Object} file html5 File instance
-     * @return {Promise} Resolved promise my have 2 response whether if upload success or fail:
-     * <ul>
-     *   <li><b>Success</b> <code>{filename: file.name, key: key}</code></li>
-     *   <li><b>Fail</b> <code>{status: xhr2.status, err: xhr2.responseText}</code></li>
-     * </ul>
+     * @param {String=s3} storageService Name of PredicSis' storage service.
+     *                                   The API only accepts one of the following values: s3.
      */
-    this.upload = function(file) {
-      var fileIndex = findFileIndex(file);
-      Upload.getCredentials('s3')
-        .then(function(credential) {
-          var key = credential.key.replace('${filename}', file.name);
-          var xhr2 = new XMLHttpRequest();
-          requests[fileIndex] = xhr2;
-          var form = formFactory({
-            key: key,
-            AWSAccessKeyId: credential.aws_access_key_id,
-            'Content-Type': 'multipart/form-data',
-            success_action_status: 201,
-            acl: 'private',
-            policy: credential.policy,
-            signature: credential.signature
-          }, {
-            file: file
-          });
+    this.processFile = function(file, storageService) {
+      storageService = storageService || 's3';
 
-          xhr2.open('POST', credential.s3_endpoint, true);
-          xhr2.upload.addEventListener('progress', progressHandler.bind(null, fileIndex));
+      var xhr2 = new XMLHttpRequest();
+      var uploadId =  new Date().getTime() + '_' + (file.name || '');
+      var uploadObject = concurrentUploads[uploadId] = {
+        id: uploadId,
+        key: null,
+        fileName: file.name,
+        fileSize: file.size,
+        progression: 0,
+        isUploading: true,
+        created_at: new Date().toISOString(),
+        cancelUpload: function() {
+          xhr2.abort();
+          delete concurrentUploads[uploadId];
+          $rootScope.$broadcast('jsSDK.upload.cancelled', uploadObject);
+        }
+      };
 
-          xhr2.addEventListener('load', function() {
-            clean(fileIndex);
-            if(xhr2.status === 201) {
-              endHandler(fileIndex, {filename: file.name, key: key});
-            } else {
-              errorHandler(fileIndex, {status: xhr2.status, err: xhr2.responseText});
-            }
-          });
-          xhr2.addEventListener('error', function(err) {
-            clean(fileIndex);
-            errorHandler(fileIndex, err);
-          });
-          xhr2.send(form);
+      $rootScope.$broadcast('jsSDK.upload.starting', uploadObject);
+
+      Sources
+        .getCredentials(storageService)
+        .then(function(credentials) {
+          uploadObject.key = getKey(credentials, file.name);
+          upload(uploadObject, xhr2, credentials, file);
         });
     };
 
-    this.on = function(eventName, file, cb) {
-      if((eventName !== 'progress' && eventName !== 'end' && eventName !== 'error') || !file) {
-        throw 'Invalid event name or invalid file';
-      }
-      if(eventName === 'progress') {
-        addProgressListener(file, cb);
-      } else if (eventName === 'end') {
-        addEndListener(file, cb);
-      } else {
-        addErrorListener(file, cb);
-      }
-    };
-
-    this.list = function() {
-      return files.filter(function(file) {
-        return file !== undefined;
+    /**
+     * @ngdoc function
+     * @methodOf predicsis.jsSDK.helpers.uploadHelper
+     * @name all
+     * @description list all currently uploaded datasets
+     * @return {Array} List of active upload objects. An active upload has the following properties:
+     * <ul>
+     *   <li>id</li>
+     *   <li>key</li>
+     *   <li>fileName</li>
+     *   <li>fileSize</li>
+     *   <li>progression</li>
+     *   <li>isUploading</li>
+     *   <li>created_at</li>
+     *   <li>cancelUpload</li>
+     * </ul>
+     */
+    this.all = function() {
+      return Object.keys(concurrentUploads).map(function(key) {
+        return concurrentUploads[key];
       });
     };
 
-    this.abort = abort;
+    /**
+     * @ngdoc function
+     * @methodOf predicsis.jsSDK.helpers.uploadHelper
+     * @name get
+     * @description get an active upload
+     * @param {String} uploadId An upload identifier looks like <timestamp>_<filename>
+     * @return {Object} An upload object with the following properties:
+     * <ul>
+     *   <li>id</li>
+     *   <li>key</li>
+     *   <li>fileName</li>
+     *   <li>fileSize</li>
+     *   <li>progression</li>
+     *   <li>isUploading</li>
+     *   <li>created_at</li>
+     *   <li>cancelUpload</li>
+     * </ul>
+     */
+    this.get = function(uploadId) {
+      return concurrentUploads[uploadId];
+    };
+
+    /**
+     * @ngdoc function
+     * @methodOf predicsis.jsSDK.helpers.uploadHelper
+     * @name cancel
+     * @description Abort a single upload
+     * @param {String} uploadId Id of the upload to stop
+     */
+    this.cancel = function(uploadId) {
+      this.get(uploadId).cancelUpload();
+    };
   });
